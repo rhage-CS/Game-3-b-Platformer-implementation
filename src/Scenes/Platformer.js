@@ -801,8 +801,7 @@ class Platformer extends Phaser.Scene {
                     this.signMessage.setText(
                         "Welcome to the Mushroom Marshes!\n" +
                         "Collect all 3 keys to escape!\n" +
-                        "Psst... collect ALL coins to\n" +
-                        "discover a secret level..."
+                        "collect ALL coins as a side quest :)"
                     );
                     this.signMessage.setVisible(true);
                     this.signVisible = true;
