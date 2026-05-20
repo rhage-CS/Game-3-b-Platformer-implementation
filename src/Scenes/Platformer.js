@@ -20,8 +20,7 @@ class Platformer extends Phaser.Scene {
 
         this.wasOnGround = false;
 
-        this.health = 3;
-        this.maxHealth = 3;
+        this.lives = 3;
         this.isDead = false;
 
         this.coinScore = 0;
@@ -40,7 +39,6 @@ class Platformer extends Phaser.Scene {
         this.signVisible = false;
 
         this.powerupActive = false;
-        this.powerupTimer = null;
 
         this.musicEnabled = true;
         this.settingsOpen = false;
@@ -58,8 +56,7 @@ class Platformer extends Phaser.Scene {
                 let waterSprite = this.add.sprite(
                     tile.pixelX + tile.width / 2,
                     tile.pixelY + tile.height / 2,
-                    'tilemap_sheet',
-                    52
+                    'tilemap_sheet', 52
                 );
                 waterSprite.play('water-anim');
             }
@@ -75,7 +72,8 @@ class Platformer extends Phaser.Scene {
         this.coinGroup = this.add.group(this.coins);
         this.coins.forEach(coin => coin.anims.play('coin-spin'));
 
-        // Keys — hide base sprite, show floating sprite on top
+        // Keys — hide base sprite, show floating sprite
+        // store floatSprite ref on key so we can destroy both on collect
         this.keyObjects = this.map.createFromObjects("Objects", {
             name: "key",
             key: "tilemap_sheet",
@@ -112,16 +110,16 @@ class Platformer extends Phaser.Scene {
         this.spikeObjects = this.map.createFromObjects("Objects", {
             name: "spike",
             key: "tilemap_sheet",
-            frame: 68
+            frame: 67
         });
         this.physics.world.enable(this.spikeObjects, Phaser.Physics.Arcade.STATIC_BODY);
         this.spikeGroup = this.add.group(this.spikeObjects);
 
-        // Power ups — Tiled ID 10 = Phaser frame 9
+        // Powerups — Tiled ID 10 = Phaser frame 9
         this.powerupObjects = this.map.createFromObjects("Objects", {
             name: "powerup",
             key: "tilemap_sheet",
-            frame: 10
+            frame: 9
         });
         this.physics.world.enable(this.powerupObjects, Phaser.Physics.Arcade.STATIC_BODY);
         this.powerupGroup = this.add.group(this.powerupObjects);
@@ -143,12 +141,10 @@ class Platformer extends Phaser.Scene {
         this.physics.world.enable(this.respawnObjects, Phaser.Physics.Arcade.STATIC_BODY);
         this.respawnGroup = this.add.group(this.respawnObjects);
 
-        // Water zones — build rects from object positions and sizes
+        // Water zones
         this.waterObjects = this.map.createFromObjects("Objects", {
             name: "water"
         });
-        this.physics.world.enable(this.waterObjects, Phaser.Physics.Arcade.STATIC_BODY);
-        this.waterGroup = this.add.group(this.waterObjects);
         this.waterRects = this.waterObjects.map(obj => {
             return new Phaser.Geom.Rectangle(
                 obj.x,
@@ -208,8 +204,6 @@ class Platformer extends Phaser.Scene {
                 }
             });
             zoneEmitter.stop();
-
-            // Random timing and quantity per zone
             this.time.addEvent({
                 delay: Phaser.Math.Between(80, 500),
                 loop: true,
@@ -328,11 +322,9 @@ class Platformer extends Phaser.Scene {
             if (this.sound.get("gemSound")) this.sound.play("gemSound");
         });
 
-        // Key collection overlap
+        // Key collection overlap — destroy both physics body and float sprite
         this.physics.add.overlap(my.sprite.player, this.keyGroup, (player, key) => {
-            if (key.floatSprite) {
-                key.floatSprite.destroy();
-            }
+            if (key.floatSprite) key.floatSprite.destroy();
             key.destroy();
             this.keyCount++;
             this.keyText.setText("Keys: " + this.keyCount + "/" + this.KEY_TOTAL);
@@ -364,7 +356,7 @@ class Platformer extends Phaser.Scene {
             }
         });
 
-        // Spike overlap — lose 1 life
+        // Spike overlap
         this.physics.add.overlap(my.sprite.player, this.spikeGroup, () => {
             this.takeDamage(false);
         });
@@ -376,23 +368,10 @@ class Platformer extends Phaser.Scene {
             respawn.destroy();
         });
 
-        // Water overlap
-        this.physics.add.overlap(my.sprite.player, this.waterGroup, () => {
-            this.takeDamage(true);
-        });
-
         // Powerup overlap
         this.physics.add.overlap(my.sprite.player, this.powerupGroup, (player, powerup) => {
             if (powerup.collected) return;
             powerup.collected = true;
-            if (powerup.disableBody) {
-                powerup.disableBody(true, true);
-            } else {
-                powerup.setVisible(false);
-                if (powerup.body) {
-                    powerup.body.enable = false;
-                }
-            }
 
             this.tweens.add({
                 targets: powerup,
@@ -401,9 +380,10 @@ class Platformer extends Phaser.Scene {
                 yoyo: true,
                 ease: 'Quad.easeOut',
                 onComplete: () => {
+                    // Floating item pops out above box then disappears
                     let item = this.add.image(
                         powerup.x, powerup.y - 18,
-                        'tilemap_sheet', 10
+                        'tilemap_sheet', 9
                     );
                     this.tweens.add({
                         targets: item,
@@ -414,53 +394,25 @@ class Platformer extends Phaser.Scene {
                         onComplete: () => item.destroy()
                     });
 
-                    // Show a HUD message for the power-up
-                    if (!this.powerupText) {
-                        this.powerupText = this.add.text(
-                            this.scale.width / 2,
-                            60,
-                            "SPEED UP!",
-                            {
-                                fontSize: "22px",
-                                fill: "#ffff00",
-                                stroke: "#000000",
-                                strokeThickness: 6
-                            }
-                        ).setScrollFactor(0).setDepth(200).setOrigin(0.5).setAlpha(0);
+                    // Destroy powerup sprite
+                    powerup.destroy();
+
+                    // Speed boost for 5 seconds
+                    if (!this.powerupActive) {
+                        this.powerupActive = true;
+                        this.ACCELERATION = 1400;
+                        this.JUMP_VELOCITY = -750;
+
+                        // Show powerup prompt
+                        this.showPowerupPrompt("⚡ Speed Boost! 5 seconds!");
+
+                        this.time.delayedCall(5000, () => {
+                            this.ACCELERATION = 800;
+                            this.JUMP_VELOCITY = -550;
+                            this.powerupActive = false;
+                            this.showPowerupPrompt("Speed Boost ended.");
+                        });
                     }
-                    this.powerupText.setText("SPEED UP!");
-                    this.powerupText.setVisible(true);
-                    this.tweens.add({ targets: this.powerupText, alpha: { from: 0, to: 1 }, duration: 200 });
-
-                    // Apply/extend power-up effect for 7 seconds
-                    const DURATION = 7000;
-                    this.ACCELERATION = 1400;
-                    this.JUMP_VELOCITY = -750;
-                    if (this.coinText) this.coinText.setColor("#00ffff");
-
-                    // If a timer exists, remove it so the effect restarts
-                    if (this.powerupTimer) {
-                        this.powerupTimer.remove(false);
-                        this.powerupTimer = null;
-                    }
-
-                    this.powerupActive = true;
-                    this.powerupTimer = this.time.delayedCall(DURATION, () => {
-                        this.ACCELERATION = 800;
-                        this.JUMP_VELOCITY = -550;
-                        this.powerupActive = false;
-                        if (this.coinText) this.coinText.setColor("#ffffff");
-                        if (this.powerupText) {
-                            this.tweens.add({
-                                targets: this.powerupText,
-                                alpha: { from: 1, to: 0 },
-                                duration: 2500,
-                                onComplete: () => { if (this.powerupText) this.powerupText.setVisible(false); }
-                            });
-                        }
-                        this.powerupTimer = null;
-                    }, [], this);
-
                     if (this.sound.get("gemSound")) this.sound.play("gemSound");
                 }
             });
@@ -484,58 +436,60 @@ class Platformer extends Phaser.Scene {
             this.physics.world.debugGraphic.clear();
         }, this);
 
-        // Coin counter HUD
+        // HUD — high depth so it renders above everything
         this.coinText = this.add.text(16, 16, "Coins: 0/" + this.TOTAL_COINS, {
-            fontSize: "12px",
+            fontSize: "18px",
             fill: "#ffffff",
             stroke: "#000000",
-            strokeThickness: 3
-        }).setScrollFactor(0).setDepth(1000);
+            strokeThickness: 4,
+            fontFamily: "Arial"
+        }).setScrollFactor(0).setDepth(100);
 
-        // Key counter HUD
-        this.keyText = this.add.text(16, 32, "Keys: 0/" + this.KEY_TOTAL, {
-            fontSize: "12px",
+        this.keyText = this.add.text(16, 44, "Keys: 0/" + this.KEY_TOTAL, {
+            fontSize: "18px",
             fill: "#ffffff",
             stroke: "#000000",
-            strokeThickness: 3
-        }).setScrollFactor(0).setDepth(1000);
+            strokeThickness: 4,
+            fontFamily: "Arial"
+        }).setScrollFactor(0).setDepth(100);
 
-        // Health HUD (label + visual hearts)
-        this.healthLabel = this.add.text(16, 48, "Health:", {
-            fontSize: "12px",
-            fill: "#ffffff",
-            stroke: "#000000",
-            strokeThickness: 3
-        }).setScrollFactor(0).setDepth(1000);
-
-        this.healthHearts = this.add.text(86, 48, "❤️❤️❤️", {
-            fontSize: "12px",
+        this.livesText = this.add.text(16, 72, "Lives: ❤️❤️❤️", {
+            fontSize: "18px",
             fill: "#ff4444",
             stroke: "#000000",
-            strokeThickness: 3
-        }).setScrollFactor(0).setDepth(1000);
+            strokeThickness: 4,
+            fontFamily: "Arial"
+        }).setScrollFactor(0).setDepth(100);
 
-        // Sign E prompt (world-space popup above the sign)
-        this.signPromptBackground = this.add.rectangle(
-            0,
-            0,
-            220,
-            32,
-            0x000000,
-            0
-        ).setScrollFactor(1).setDepth(9).setVisible(false).setOrigin(0.5);
-
-        this.signPrompt = this.add.text(
-            0,
-            0,
-            "Press E to interact",
+        // Powerup prompt — center screen, fades out
+        this.powerupPrompt = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2 - 80,
+            "",
             {
-                fontSize: "14px",
-                fill: "#ffffff",
+                fontSize: "20px",
+                fill: "#00ffff",
                 stroke: "#000000",
-                strokeThickness: 4
+                strokeThickness: 4,
+                fontFamily: "Arial",
+                backgroundColor: "#000000",
+                padding: { x: 12, y: 6 }
             }
-        ).setScrollFactor(1).setDepth(10).setVisible(false).setOrigin(0.5);
+        ).setScrollFactor(0).setDepth(100).setVisible(false).setOrigin(0.5);
+
+        // Sign E prompt
+        this.signPrompt = this.add.text(
+            this.scale.width / 2,
+            this.scale.height - 60,
+            "Press E to read",
+            {
+                fontSize: "16px",
+                fill: "#ffff00",
+                stroke: "#000000",
+                strokeThickness: 4,
+                fontFamily: "Arial"
+            }
+        ).setScrollFactor(0).setDepth(100).setVisible(false).setOrigin(0.5);
 
         // Sign message box
         this.signMessage = this.add.text(
@@ -543,15 +497,16 @@ class Platformer extends Phaser.Scene {
             this.scale.height / 2,
             "",
             {
-                fontSize: "14px",
+                fontSize: "16px",
                 fill: "#ffffff",
                 stroke: "#000000",
                 strokeThickness: 4,
                 backgroundColor: "#000000",
                 padding: { x: 10, y: 6 },
-                align: "center"
+                align: "center",
+                fontFamily: "Arial"
             }
-        ).setScrollFactor(0).setDepth(10).setVisible(false).setOrigin(0.5);
+        ).setScrollFactor(0).setDepth(100).setVisible(false).setOrigin(0.5);
 
         // Game over overlay
         this.gameOverOverlay = this.add.rectangle(
@@ -560,7 +515,7 @@ class Platformer extends Phaser.Scene {
             this.scale.width,
             this.scale.height,
             0x000000, 0.85
-        ).setScrollFactor(0).setDepth(30).setVisible(false);
+        ).setScrollFactor(0).setDepth(200).setVisible(false);
 
         this.gameOverTitle = this.add.text(
             this.scale.width / 2,
@@ -570,35 +525,38 @@ class Platformer extends Phaser.Scene {
                 fontSize: "48px",
                 fill: "#ff2222",
                 stroke: "#000000",
-                strokeThickness: 6
+                strokeThickness: 6,
+                fontFamily: "Arial"
             }
-        ).setScrollFactor(0).setDepth(31).setVisible(false).setOrigin(0.5);
+        ).setScrollFactor(0).setDepth(201).setVisible(false).setOrigin(0.5);
 
         this.gameOverSub = this.add.text(
             this.scale.width / 2,
             this.scale.height / 2 - 20,
-            "You ran out of health...",
+            "You ran out of lives...",
             {
-                fontSize: "18px",
+                fontSize: "20px",
                 fill: "#ffffff",
                 stroke: "#000000",
-                strokeThickness: 3
+                strokeThickness: 3,
+                fontFamily: "Arial"
             }
-        ).setScrollFactor(0).setDepth(31).setVisible(false).setOrigin(0.5);
+        ).setScrollFactor(0).setDepth(201).setVisible(false).setOrigin(0.5);
 
         this.gameOverRestart = this.add.text(
             this.scale.width / 2,
             this.scale.height / 2 + 50,
             "▶  Try Again",
             {
-                fontSize: "22px",
+                fontSize: "24px",
                 fill: "#ffffff",
                 stroke: "#000000",
                 strokeThickness: 4,
                 backgroundColor: "#881111",
-                padding: { x: 24, y: 10 }
+                padding: { x: 24, y: 10 },
+                fontFamily: "Arial"
             }
-        ).setScrollFactor(0).setDepth(31).setVisible(false).setOrigin(0.5)
+        ).setScrollFactor(0).setDepth(201).setVisible(false).setOrigin(0.5)
          .setInteractive({ useHandCursor: true });
 
         this.gameOverRestart.on('pointerover', () => {
@@ -618,7 +576,7 @@ class Platformer extends Phaser.Scene {
             this.scale.height / 2,
             400, 220,
             0x000000, 0.9
-        ).setScrollFactor(0).setDepth(20).setVisible(false);
+        ).setScrollFactor(0).setDepth(150).setVisible(false);
 
         this.settingsTitle = this.add.text(
             this.scale.width / 2,
@@ -628,16 +586,17 @@ class Platformer extends Phaser.Scene {
                 fontSize: "22px",
                 fill: "#ffffff",
                 stroke: "#000000",
-                strokeThickness: 4
+                strokeThickness: 4,
+                fontFamily: "Arial"
             }
-        ).setScrollFactor(0).setDepth(21).setVisible(false).setOrigin(0.5);
+        ).setScrollFactor(0).setDepth(151).setVisible(false).setOrigin(0.5);
 
         this.settingsDivider = this.add.rectangle(
             this.scale.width / 2,
             this.scale.height / 2 - 40,
             360, 2,
             0x444444
-        ).setScrollFactor(0).setDepth(21).setVisible(false);
+        ).setScrollFactor(0).setDepth(151).setVisible(false);
 
         this.musicButton = this.add.text(
             this.scale.width / 2,
@@ -649,9 +608,10 @@ class Platformer extends Phaser.Scene {
                 stroke: "#000000",
                 strokeThickness: 3,
                 backgroundColor: "#222222",
-                padding: { x: 20, y: 8 }
+                padding: { x: 20, y: 8 },
+                fontFamily: "Arial"
             }
-        ).setScrollFactor(0).setDepth(21).setVisible(false).setOrigin(0.5)
+        ).setScrollFactor(0).setDepth(151).setVisible(false).setOrigin(0.5)
          .setInteractive({ useHandCursor: true });
 
         this.musicButton.on('pointerover', () => {
@@ -683,9 +643,10 @@ class Platformer extends Phaser.Scene {
                 fontSize: "12px",
                 fill: "#888888",
                 stroke: "#000000",
-                strokeThickness: 2
+                strokeThickness: 2,
+                fontFamily: "Arial"
             }
-        ).setScrollFactor(0).setDepth(21).setVisible(false).setOrigin(0.5);
+        ).setScrollFactor(0).setDepth(151).setVisible(false).setOrigin(0.5);
 
         // Background music
         this.bgm = this.sound.add("bgm", {
@@ -703,6 +664,27 @@ class Platformer extends Phaser.Scene {
         this.cameras.main.startFollow(my.sprite.player, true, 0.1, 0.1);
         this.cameras.main.setDeadzone(50, 50);
         this.cameras.main.setZoom(this.SCALE);
+    }
+
+    // Show a temporary powerup prompt that fades out
+    showPowerupPrompt(message) {
+        this.powerupPrompt.setText(message);
+        this.powerupPrompt.setVisible(true);
+        this.powerupPrompt.setAlpha(1);
+
+        // Kill any existing tween on the prompt
+        this.tweens.killTweensOf(this.powerupPrompt);
+
+        this.tweens.add({
+            targets: this.powerupPrompt,
+            alpha: 0,
+            duration: 2000,
+            delay: 1000,
+            ease: 'Linear',
+            onComplete: () => {
+                this.powerupPrompt.setVisible(false);
+            }
+        });
     }
 
     openSettings() {
@@ -737,30 +719,21 @@ class Platformer extends Phaser.Scene {
         if (this.sound.get("hurtSound")) this.sound.play("hurtSound");
 
         if (isWater) {
-            this.health = 0;
-
-            let heartsStr = "";
-            for (let i = 0; i < this.health; i++) heartsStr += "❤️";
-            for (let i = this.health; i < this.maxHealth; i++) heartsStr += "🖤";
-            this.healthHearts.setText(heartsStr);
-
             this.time.delayedCall(300, () => {
-                let respawnX = this.respawnX || this.startX;
-                let respawnY = this.respawnY || this.startY;
-                my.sprite.player.setPosition(respawnX, respawnY);
+                my.sprite.player.setPosition(this.startX, this.startY);
                 my.sprite.player.setVelocity(0, 0);
                 my.sprite.player.setAcceleration(0, 0);
                 this.isDead = false;
             });
         } else {
-            this.health--;
+            this.lives--;
 
             let heartsStr = "";
-            for (let i = 0; i < this.health; i++) heartsStr += "❤️";
-            for (let i = this.health; i < this.maxHealth; i++) heartsStr += "🖤";
-            this.healthHearts.setText(heartsStr);
+            for (let i = 0; i < this.lives; i++) heartsStr += "❤️";
+            for (let i = this.lives; i < 3; i++) heartsStr += "🖤";
+            this.livesText.setText("Lives: " + heartsStr);
 
-            if (this.health <= 0) {
+            if (this.lives <= 0) {
                 this.time.delayedCall(400, () => {
                     if (this.bgm) this.bgm.stop();
                     this.gameOverOverlay.setVisible(true);
@@ -805,7 +778,7 @@ class Platformer extends Phaser.Scene {
 
         if (this.settingsOpen) return;
 
-        // Water hazard check using rect bounds
+        // Water hazard check
         let px = my.sprite.player.x;
         let py = my.sprite.player.y;
         this.waterRects.forEach(rect => {
@@ -819,11 +792,6 @@ class Platformer extends Phaser.Scene {
         this.nearSign = null;
 
         if (wasNearSign) {
-            let promptX = wasNearSign.x;
-            let promptY = wasNearSign.y - (wasNearSign.displayHeight || 32) - 16;
-            this.signPromptBackground.setPosition(promptX, promptY);
-            this.signPrompt.setPosition(promptX, promptY);
-            this.signPromptBackground.setVisible(true);
             this.signPrompt.setVisible(true);
             if (Phaser.Input.Keyboard.JustDown(this.eKey)) {
                 if (this.signVisible) {
@@ -841,7 +809,6 @@ class Platformer extends Phaser.Scene {
                 }
             }
         } else {
-            this.signPromptBackground.setVisible(false);
             this.signPrompt.setVisible(false);
             this.signMessage.setVisible(false);
             this.signVisible = false;

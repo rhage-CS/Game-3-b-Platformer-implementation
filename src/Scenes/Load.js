@@ -31,13 +31,13 @@ class Load extends Phaser.Scene {
 
         // Audio effects
         // Get free sounds at https://kenney.nl/assets/interface-sounds
-        this.load.audio("jumpSound",       "jump.wav");
-        this.load.audio("doubleJumpSound", "jump2.wav");
-        this.load.audio("landSound",       "land.wav");
-        this.load.audio("gemSound",        "coin.wav");
-        this.load.audio("keySound",        "key.wav");
-        this.load.audio("hurtSound",       "hurt.wav");
-        this.load.audio("doorOpenSound",   "doorOpen.wav");
+        this.load.audio("jumpSound",       "jump.mp3");
+        this.load.audio("doubleJumpSound", "jump2.mp3");
+        this.load.audio("landSound",       "land.mp3");
+        this.load.audio("gemSound",        "coin.mp3");
+        this.load.audio("keySound",        "coin.mp3"); 
+        this.load.audio("doorOpenSound",   "doorOpen.mp3");
+        this.load.audio("walkSound",       "walk.mp3");
     }
 
     create() {
