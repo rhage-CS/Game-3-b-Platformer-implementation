@@ -1,83 +1,179 @@
+// Platformer.js
+// Main game scene for Alien Escape — The Mushroom Marshes
+
 class Platformer extends Phaser.Scene {
     constructor() {
         super("platformerScene");
     }
 
     init() {
-        // variables and settings
-        this.ACCELERATION = 400;
-        this.DRAG = 500;    // DRAG < ACCELERATION = icy slide
-        this.physics.world.gravity.y = 1500;
-        this.JUMP_VELOCITY = -600;
+        this.ACCELERATION = 800;
+        this.DRAG = 1200;
+        this.physics.world.gravity.y = 2000;
+        this.JUMP_VELOCITY = -550;
+        this.DOUBLE_JUMP_VELOCITY = -450;
         this.PARTICLE_VELOCITY = 50;
         this.SCALE = 2.0;
+
+        this.canDoubleJump = false;
+        this.hasDoubleJumped = false;
+
+        this.wasOnGround = false;
+
+        this.health = 3;
+        this.maxHealth = 3;
+        this.isDead = false;
+
+        this.coinScore = 0;
+        this.TOTAL_COINS = 9;
+        this.keyCount = 0;
+        this.KEY_TOTAL = 3;
+
+        this.startX = 81;
+        this.startY = 350;
+        this.respawnX = 81;
+        this.respawnY = 350;
+
+        this.lastDirection = 1;
+
+        this.nearSign = null;
+        this.signVisible = false;
+
+        this.powerupActive = false;
+        this.powerupTimer = null;
+
+        this.musicEnabled = true;
+        this.settingsOpen = false;
     }
 
     create() {
-        // Create a new tilemap game object which uses 18x18 pixel tiles, and is
-        // 45 tiles wide and 25 tiles tall.
-        this.map = this.add.tilemap("platformer-level-1", 18, 18, 45, 25);
-
-        // Add a tileset to the map
-        // First parameter: name we gave the tileset in Tiled
-        // Second parameter: key for the tilesheet (from this.load.image in Load.js)
+        this.map = this.add.tilemap("platformer-level-1", 18, 18, 80, 50);
         this.tileset = this.map.addTilesetImage("kenny_tilemap_packed", "tilemap_tiles");
-
-        // Create a layer
         this.groundLayer = this.map.createLayer("Ground-n-Platforms", this.tileset, 0, 0);
+        this.groundLayer.setCollisionByProperty({ collides: true });
 
-        // Make it collidable
-        this.groundLayer.setCollisionByProperty({
-            collides: true
+        // Overlay animated sprites on top of every water tile
+        this.groundLayer.forEachTile(tile => {
+            if (tile.index === 53) {
+                let waterSprite = this.add.sprite(
+                    tile.pixelX + tile.width / 2,
+                    tile.pixelY + tile.height / 2,
+                    'tilemap_sheet',
+                    52
+                );
+                waterSprite.play('water-anim');
+            }
         });
 
-        // Create coins from Objects layer in tilemap
+        // Coins
         this.coins = this.map.createFromObjects("Objects", {
             name: "coin",
             key: "tilemap_sheet",
             frame: 151
         });
-
         this.physics.world.enable(this.coins, Phaser.Physics.Arcade.STATIC_BODY);
-
-        // Create a Phaser group out of the array this.coins
-        // This will be used for collision detection below.
         this.coinGroup = this.add.group(this.coins);
+        this.coins.forEach(coin => coin.anims.play('coin-spin'));
 
-        // Create water zones from Objects layer in tilemap
+        // Keys — hide base sprite, show floating sprite on top
+        this.keyObjects = this.map.createFromObjects("Objects", {
+            name: "key",
+            key: "tilemap_sheet",
+            frame: 27
+        });
+        this.physics.world.enable(this.keyObjects, Phaser.Physics.Arcade.STATIC_BODY);
+        this.keyGroup = this.add.group(this.keyObjects);
+        this.keyObjects.forEach(key => {
+            let baseY = key.y;
+            key.setVisible(false);
+            let floatKey = this.add.sprite(key.x, baseY, 'tilemap_sheet', 27);
+            key.floatSprite = floatKey;
+            this.tweens.add({
+                targets: floatKey,
+                y: baseY - 4,
+                duration: 600,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+        });
+
+        // Exit door — Tiled ID 130 = Phaser frame 129
+        this.exitObjects = this.map.createFromObjects("Objects", {
+            name: "exit",
+            key: "tilemap_sheet",
+            frame: 129
+        });
+        this.physics.world.enable(this.exitObjects, Phaser.Physics.Arcade.STATIC_BODY);
+        this.exitGroup = this.add.group(this.exitObjects);
+        this.exitObjects.forEach(exit => exit.setAlpha(0.4));
+
+        // Spikes — Tiled ID 68 = Phaser frame 67
+        this.spikeObjects = this.map.createFromObjects("Objects", {
+            name: "spike",
+            key: "tilemap_sheet",
+            frame: 68
+        });
+        this.physics.world.enable(this.spikeObjects, Phaser.Physics.Arcade.STATIC_BODY);
+        this.spikeGroup = this.add.group(this.spikeObjects);
+
+        // Power ups — Tiled ID 10 = Phaser frame 9
+        this.powerupObjects = this.map.createFromObjects("Objects", {
+            name: "powerup",
+            key: "tilemap_sheet",
+            frame: 10
+        });
+        this.physics.world.enable(this.powerupObjects, Phaser.Physics.Arcade.STATIC_BODY);
+        this.powerupGroup = this.add.group(this.powerupObjects);
+
+        // Signs
+        this.signObjects = this.map.createFromObjects("Objects", {
+            name: "sign",
+            key: "tilemap_sheet",
+            frame: 86
+        });
+        this.physics.world.enable(this.signObjects, Phaser.Physics.Arcade.STATIC_BODY);
+        this.signGroup = this.add.group(this.signObjects);
+
+        // Respawn zones
+        this.respawnObjects = this.map.createFromObjects("Objects", {
+            name: "respawn"
+        });
+        this.respawnObjects.forEach(obj => obj.setVisible(false));
+        this.physics.world.enable(this.respawnObjects, Phaser.Physics.Arcade.STATIC_BODY);
+        this.respawnGroup = this.add.group(this.respawnObjects);
+
+        // Water zones — build rects from object positions and sizes
         this.waterObjects = this.map.createFromObjects("Objects", {
             name: "water"
         });
-
-        // Build water rects from the water objects' positions and sizes
-        let waterRects = this.waterObjects.map(obj => {
-            return new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
+        this.physics.world.enable(this.waterObjects, Phaser.Physics.Arcade.STATIC_BODY);
+        this.waterGroup = this.add.group(this.waterObjects);
+        this.waterRects = this.waterObjects.map(obj => {
+            return new Phaser.Geom.Rectangle(
+                obj.x,
+                obj.y,
+                obj.displayWidth  || obj.width  || 18,
+                obj.displayHeight || obj.height || 18
+            );
         });
-
-        // Hide the water objects themselves (we just need their bounds)
         this.waterObjects.forEach(obj => obj.setVisible(false));
 
-        // Create a circle texture for bubbles using Phaser Graphics
+        // Bubble texture
         let bubbleGfx = this.make.graphics({ x: 0, y: 0, add: false });
         bubbleGfx.fillStyle(0xaaddff, 1);
         bubbleGfx.fillCircle(4, 4, 4);
         bubbleGfx.generateTexture("bubble", 8, 8);
         bubbleGfx.destroy();
 
-        // Create a "pop" ring texture for when bubbles reach end of lifespan
+        // Bubble pop ring texture
         let popGfx = this.make.graphics({ x: 0, y: 0, add: false });
         popGfx.lineStyle(1, 0xffffff, 1);
         popGfx.strokeCircle(6, 6, 5);
         popGfx.generateTexture("bubblePop", 12, 12);
         popGfx.destroy();
 
-        ////////////////////
-        // TODO: put water bubble particle effect here
-        // It's OK to have it start running
-        ////////////////////
-
-        // Pop emitter — triggered when a bubble dies
-        // (b) Bubble pop effect at end of lifespan
+        // Bubble pop emitter
         my.vfx.bubblePop = this.add.particles(0, 0, "bubblePop", {
             lifespan: 200,
             speed:    { min: 10, max: 30 },
@@ -87,31 +183,23 @@ class Platformer extends Phaser.Scene {
             emitting: false
         });
 
-        // Each water zone gets its own dedicated emitter and independent random timer
-        waterRects.forEach(rect => {
+        // Each water zone gets its own emitter with randomness
+        this.waterRects.forEach(rect => {
             let zoneEmitter = this.add.particles(0, 0, "bubble", {
                 emitZone: { type: 'random', source: rect },
-                speedY:   { min: -20, max: -60 },
-                speedX:   { min: -5,  max: 5  },
-                lifespan: { min: 800, max: 2000 },
-                scale:    { min: 0.5, max: 1.5 },
-                alpha:    { start: 0.6, end: 0 },
+                speedY:   { min: -15, max: -70 },
+                speedX:   { min: -8,  max: 8   },
+                lifespan: { min: 600, max: 2500 },
+                scale:    { min: 0.2, max: 2.0 },
+                alpha:    { start: 0.7, end: 0 },
                 blendMode: 'ADD',
-
-                // (a) onEmit: assign a random phase to each particle so they
-                // don't all sway in sync with each other
                 onEmit: (particle) => {
                     particle.phase = Math.random() * Math.PI * 2;
                 },
-
-                // (a) onUpdate: oscillate each bubble's X acceleration using
-                // its individual phase so it wiggles as it rises
                 onUpdate: (particle) => {
                     particle.accelerationX = Math.sin(
                         (this.time.now * 0.003) + particle.phase
-                    ) * 20;
-
-                    // (b) trigger pop when bubble is nearly dead (last 5% of lifespan)
+                    ) * 25;
                     if (particle.lifeT < 0.05 && !particle.popped) {
                         particle.popped = true;
                         my.vfx.bubblePop.setPosition(particle.x, particle.y);
@@ -119,143 +207,729 @@ class Platformer extends Phaser.Scene {
                     }
                 }
             });
-
             zoneEmitter.stop();
 
+            // Random timing and quantity per zone
             this.time.addEvent({
-                delay: Phaser.Math.Between(100, 400),
+                delay: Phaser.Math.Between(80, 500),
                 loop: true,
                 callback: () => {
-                    // Always explode at least 1, up to 3 bubbles per zone per tick
-                    zoneEmitter.explode(Phaser.Math.Between(1, 3));
+                    zoneEmitter.explode(Phaser.Math.Between(1, 4));
                 }
             });
         });
 
-        // set up player avatar
-        my.sprite.player = this.physics.add.sprite(30, 345, "platformer_characters", "tile_0000.png");
+        // Player
+        my.sprite.player = this.physics.add.sprite(
+            this.startX, this.startY,
+            "platformer_characters", "tile_0000.png"
+        );
         my.sprite.player.setCollideWorldBounds(true);
-
-        // Enable collision handling
         this.physics.add.collider(my.sprite.player, this.groundLayer);
 
-        // TODO: create coin collect particle effect here
-        // Important: make sure it's not running
-        // Uses star_01-03.png from kenny-particles atlas (confirmed in kenny-particles.json)
-        // Scale is very small because the source sprites are 512x512px
+        // Coin collect particles
         my.vfx.coinCollect = this.add.particles(0, 0, "kenny-particles", {
             frame: ["star_01.png", "star_02.png", "star_03.png"],
             lifespan: 600,
             speed:    { min: 50, max: 150 },
-            scale:    { start: 0.04, end: 0 },  // 512px source -> ~20px particle
-            alpha:    { start: 1,    end: 0 },
+            scale:    { start: 0.04, end: 0 },
+            alpha:    { start: 1, end: 0 },
             rotate:   { min: 0, max: 360 },
             gravityY: 300,
             quantity: 12,
-            emitting: false                      // NOT running at start
+            emitting: false
         });
 
-        // Coin collision handler
-        this.physics.add.overlap(my.sprite.player, this.coinGroup, (obj1, obj2) => {
-            obj2.destroy(); // remove coin on overlap
-            ////////////////////
-            // TODO: start the coin collect particle effect here
-            ////////////////////
-            my.vfx.coinCollect.setPosition(obj2.x, obj2.y); // burst at coin location
-            my.vfx.coinCollect.explode(12);                  // one-shot burst of 12 particles
+        // Key collect particles
+        my.vfx.keyCollect = this.add.particles(0, 0, "kenny-particles", {
+            frame: ["magic_01.png", "magic_02.png", "magic_03.png"],
+            lifespan: 800,
+            speed:    { min: 40, max: 180 },
+            scale:    { start: 0.05, end: 0 },
+            alpha:    { start: 1, end: 0 },
+            rotate:   { min: 0, max: 360 },
+            gravityY: 100,
+            quantity: 20,
+            emitting: false
         });
 
-        // set up Phaser-provided cursor key input
+        // Jump particles
+        my.vfx.jump = this.add.particles(0, 0, "kenny-particles", {
+            frame: ["spark_01.png", "spark_02.png", "spark_03.png"],
+            lifespan: 300,
+            speed:    { min: 30, max: 100 },
+            scale:    { start: 0.03, end: 0 },
+            alpha:    { start: 1, end: 0 },
+            angle:    { min: 180, max: 360 },
+            gravityY: 400,
+            quantity: 8,
+            emitting: false
+        });
+
+        // Double jump particles
+        my.vfx.doubleJump = this.add.particles(0, 0, "kenny-particles", {
+            frame: ["twirl_01.png", "twirl_02.png", "twirl_03.png"],
+            lifespan: 400,
+            speed:    { min: 50, max: 120 },
+            scale:    { start: 0.05, end: 0 },
+            alpha:    { start: 1, end: 0 },
+            rotate:   { min: 0, max: 360 },
+            gravityY: 200,
+            quantity: 10,
+            emitting: false
+        });
+
+        // Land dust particles
+        my.vfx.land = this.add.particles(0, 0, "kenny-particles", {
+            frame: ["dirt_01.png", "dirt_02.png", "dirt_03.png"],
+            lifespan: 300,
+            speed:    { min: 20, max: 80 },
+            scale:    { start: 0.03, end: 0 },
+            alpha:    { start: 0.8, end: 0 },
+            angle:    { min: 160, max: 200 },
+            gravityY: 300,
+            quantity: 6,
+            emitting: false
+        });
+
+        // Walk dust particles
+        my.vfx.walk = this.add.particles(0, 0, "kenny-particles", {
+            frame: ["dirt_01.png", "dirt_02.png", "dirt_03.png"],
+            lifespan: 200,
+            speed:    { min: 10, max: 40 },
+            scale:    { start: 0.025, end: 0 },
+            alpha:    { start: 0.8, end: 0 },
+            angle:    { min: 160, max: 200 },
+            gravityY: 300,
+            quantity: 1,
+            frequency: 100,
+            emitting: false
+        });
+
+        // Hurt particles
+        my.vfx.hurt = this.add.particles(0, 0, "kenny-particles", {
+            frame: ["spark_01.png", "spark_02.png"],
+            lifespan: 400,
+            speed:    { min: 50, max: 150 },
+            scale:    { start: 0.04, end: 0 },
+            alpha:    { start: 1, end: 0 },
+            tint:     0xff0000,
+            quantity: 10,
+            emitting: false
+        });
+
+        // Coin collection overlap
+        this.physics.add.overlap(my.sprite.player, this.coinGroup, (player, coin) => {
+            coin.destroy();
+            this.coinScore++;
+            this.coinText.setText("Coins: " + this.coinScore + "/" + this.TOTAL_COINS);
+            my.vfx.coinCollect.setPosition(coin.x, coin.y);
+            my.vfx.coinCollect.explode(12);
+            if (this.sound.get("gemSound")) this.sound.play("gemSound");
+        });
+
+        // Key collection overlap
+        this.physics.add.overlap(my.sprite.player, this.keyGroup, (player, key) => {
+            if (key.floatSprite) {
+                key.floatSprite.destroy();
+            }
+            key.destroy();
+            this.keyCount++;
+            this.keyText.setText("Keys: " + this.keyCount + "/" + this.KEY_TOTAL);
+            my.vfx.keyCollect.setPosition(key.x, key.y);
+            my.vfx.keyCollect.explode(20);
+            if (this.sound.get("keySound")) this.sound.play("keySound");
+
+            if (this.keyCount >= this.KEY_TOTAL) {
+                this.exitObjects.forEach(exit => {
+                    this.tweens.add({
+                        targets: exit,
+                        alpha: { from: 0.4, to: 1 },
+                        duration: 300,
+                        yoyo: true,
+                        repeat: 3,
+                        onComplete: () => exit.setAlpha(1)
+                    });
+                });
+                this.keyText.setColor("#ffff00");
+                if (this.sound.get("doorOpenSound")) this.sound.play("doorOpenSound");
+            }
+        });
+
+        // Exit door overlap
+        this.physics.add.overlap(my.sprite.player, this.exitGroup, () => {
+            if (this.keyCount >= this.KEY_TOTAL) {
+                if (this.bgm) this.bgm.stop();
+                this.scene.start("winScene");
+            }
+        });
+
+        // Spike overlap — lose 1 life
+        this.physics.add.overlap(my.sprite.player, this.spikeGroup, () => {
+            this.takeDamage(false);
+        });
+
+        // Respawn zone overlap
+        this.physics.add.overlap(my.sprite.player, this.respawnGroup, (player, respawn) => {
+            this.respawnX = respawn.x;
+            this.respawnY = respawn.y;
+            respawn.destroy();
+        });
+
+        // Water overlap
+        this.physics.add.overlap(my.sprite.player, this.waterGroup, () => {
+            this.takeDamage(true);
+        });
+
+        // Powerup overlap
+        this.physics.add.overlap(my.sprite.player, this.powerupGroup, (player, powerup) => {
+            if (powerup.collected) return;
+            powerup.collected = true;
+            if (powerup.disableBody) {
+                powerup.disableBody(true, true);
+            } else {
+                powerup.setVisible(false);
+                if (powerup.body) {
+                    powerup.body.enable = false;
+                }
+            }
+
+            this.tweens.add({
+                targets: powerup,
+                y: powerup.y - 10,
+                duration: 100,
+                yoyo: true,
+                ease: 'Quad.easeOut',
+                onComplete: () => {
+                    let item = this.add.image(
+                        powerup.x, powerup.y - 18,
+                        'tilemap_sheet', 10
+                    );
+                    this.tweens.add({
+                        targets: item,
+                        y: item.y - 20,
+                        alpha: { from: 1, to: 0 },
+                        duration: 600,
+                        ease: 'Quad.easeOut',
+                        onComplete: () => item.destroy()
+                    });
+
+                    // Show a HUD message for the power-up
+                    if (!this.powerupText) {
+                        this.powerupText = this.add.text(
+                            this.scale.width / 2,
+                            60,
+                            "SPEED UP!",
+                            {
+                                fontSize: "22px",
+                                fill: "#ffff00",
+                                stroke: "#000000",
+                                strokeThickness: 6
+                            }
+                        ).setScrollFactor(0).setDepth(200).setOrigin(0.5).setAlpha(0);
+                    }
+                    this.powerupText.setText("SPEED UP!");
+                    this.powerupText.setVisible(true);
+                    this.tweens.add({ targets: this.powerupText, alpha: { from: 0, to: 1 }, duration: 200 });
+
+                    // Apply/extend power-up effect for 7 seconds
+                    const DURATION = 7000;
+                    this.ACCELERATION = 1400;
+                    this.JUMP_VELOCITY = -750;
+                    if (this.coinText) this.coinText.setColor("#00ffff");
+
+                    // If a timer exists, remove it so the effect restarts
+                    if (this.powerupTimer) {
+                        this.powerupTimer.remove(false);
+                        this.powerupTimer = null;
+                    }
+
+                    this.powerupActive = true;
+                    this.powerupTimer = this.time.delayedCall(DURATION, () => {
+                        this.ACCELERATION = 800;
+                        this.JUMP_VELOCITY = -550;
+                        this.powerupActive = false;
+                        if (this.coinText) this.coinText.setColor("#ffffff");
+                        if (this.powerupText) {
+                            this.tweens.add({
+                                targets: this.powerupText,
+                                alpha: { from: 1, to: 0 },
+                                duration: 2500,
+                                onComplete: () => { if (this.powerupText) this.powerupText.setVisible(false); }
+                            });
+                        }
+                        this.powerupTimer = null;
+                    }, [], this);
+
+                    if (this.sound.get("gemSound")) this.sound.play("gemSound");
+                }
+            });
+        });
+
+        // Sign overlap
+        this.physics.add.overlap(my.sprite.player, this.signGroup, (player, sign) => {
+            this.nearSign = sign;
+        });
+
+        // Input
         cursors = this.input.keyboard.createCursorKeys();
-
         this.rKey = this.input.keyboard.addKey('R');
+        this.eKey = this.input.keyboard.addKey('E');
+        this.escKey = this.input.keyboard.addKey(
+            Phaser.Input.Keyboard.KeyCodes.ESC
+        );
 
-        // Pause key setup — must use addKey here in create(), JustDown only in update()
-        this.pKey = this.input.keyboard.addKey('P');
-
-        // debug key listener (assigned to D key)
         this.input.keyboard.on('keydown-D', () => {
-            this.physics.world.drawDebug = this.physics.world.drawDebug ? false : true
-            this.physics.world.debugGraphic.clear()
+            this.physics.world.drawDebug = this.physics.world.drawDebug ? false : true;
+            this.physics.world.debugGraphic.clear();
         }, this);
 
-        // TODO: Add movement vfx here
-        // Walking dust particles using smoke_01-03.png (confirmed in kenny-particles.json)
-        // Scale is very small because the source sprites are 512x512px
-        my.vfx.walk = this.add.particles(0, 0, "kenny-particles", {
-            frame: ["smoke_01.png", "smoke_02.png", "smoke_03.png"],
-            lifespan: 250,
-            speed:    { min: 5, max: 20 },
-            scale:    { start: 0.03, end: 0 },  // 512px source -> ~15px puff
-            alpha:    { start: 0.4, end: 0 },
-            gravityY: -100,                      // drifts slightly upward like dust
-            quantity: 1,
-            frequency: 80,                       // emit every 80ms while walking
-            emitting: false                      // start off, enabled in update()
+        // Coin counter HUD
+        this.coinText = this.add.text(16, 16, "Coins: 0/" + this.TOTAL_COINS, {
+            fontSize: "12px",
+            fill: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 3
+        }).setScrollFactor(0).setDepth(1000);
+
+        // Key counter HUD
+        this.keyText = this.add.text(16, 32, "Keys: 0/" + this.KEY_TOTAL, {
+            fontSize: "12px",
+            fill: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 3
+        }).setScrollFactor(0).setDepth(1000);
+
+        // Health HUD (label + visual hearts)
+        this.healthLabel = this.add.text(16, 48, "Health:", {
+            fontSize: "12px",
+            fill: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 3
+        }).setScrollFactor(0).setDepth(1000);
+
+        this.healthHearts = this.add.text(86, 48, "❤️❤️❤️", {
+            fontSize: "12px",
+            fill: "#ff4444",
+            stroke: "#000000",
+            strokeThickness: 3
+        }).setScrollFactor(0).setDepth(1000);
+
+        // Sign E prompt (world-space popup above the sign)
+        this.signPromptBackground = this.add.rectangle(
+            0,
+            0,
+            220,
+            32,
+            0x000000,
+            0
+        ).setScrollFactor(1).setDepth(9).setVisible(false).setOrigin(0.5);
+
+        this.signPrompt = this.add.text(
+            0,
+            0,
+            "Press E to interact",
+            {
+                fontSize: "14px",
+                fill: "#ffffff",
+                stroke: "#000000",
+                strokeThickness: 4
+            }
+        ).setScrollFactor(1).setDepth(10).setVisible(false).setOrigin(0.5);
+
+        // Sign message box
+        this.signMessage = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2,
+            "",
+            {
+                fontSize: "14px",
+                fill: "#ffffff",
+                stroke: "#000000",
+                strokeThickness: 4,
+                backgroundColor: "#000000",
+                padding: { x: 10, y: 6 },
+                align: "center"
+            }
+        ).setScrollFactor(0).setDepth(10).setVisible(false).setOrigin(0.5);
+
+        // Game over overlay
+        this.gameOverOverlay = this.add.rectangle(
+            this.scale.width / 2,
+            this.scale.height / 2,
+            this.scale.width,
+            this.scale.height,
+            0x000000, 0.85
+        ).setScrollFactor(0).setDepth(30).setVisible(false);
+
+        this.gameOverTitle = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2 - 80,
+            "YOU DIED",
+            {
+                fontSize: "48px",
+                fill: "#ff2222",
+                stroke: "#000000",
+                strokeThickness: 6
+            }
+        ).setScrollFactor(0).setDepth(31).setVisible(false).setOrigin(0.5);
+
+        this.gameOverSub = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2 - 20,
+            "You ran out of health...",
+            {
+                fontSize: "18px",
+                fill: "#ffffff",
+                stroke: "#000000",
+                strokeThickness: 3
+            }
+        ).setScrollFactor(0).setDepth(31).setVisible(false).setOrigin(0.5);
+
+        this.gameOverRestart = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2 + 50,
+            "▶  Try Again",
+            {
+                fontSize: "22px",
+                fill: "#ffffff",
+                stroke: "#000000",
+                strokeThickness: 4,
+                backgroundColor: "#881111",
+                padding: { x: 24, y: 10 }
+            }
+        ).setScrollFactor(0).setDepth(31).setVisible(false).setOrigin(0.5)
+         .setInteractive({ useHandCursor: true });
+
+        this.gameOverRestart.on('pointerover', () => {
+            this.gameOverRestart.setStyle({ fill: "#ffff00" });
+        });
+        this.gameOverRestart.on('pointerout', () => {
+            this.gameOverRestart.setStyle({ fill: "#ffffff" });
+        });
+        this.gameOverRestart.on('pointerdown', () => {
+            if (this.bgm) this.bgm.stop();
+            this.scene.restart();
         });
 
-        // Simple camera to follow player
-        this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
-        this.cameras.main.startFollow(my.sprite.player, true, 0.25, 0.25); // (target, [,roundPixels][,lerpX][,lerpY])
+        // Settings overlay
+        this.settingsOverlay = this.add.rectangle(
+            this.scale.width / 2,
+            this.scale.height / 2,
+            400, 220,
+            0x000000, 0.9
+        ).setScrollFactor(0).setDepth(20).setVisible(false);
+
+        this.settingsTitle = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2 - 70,
+            "⚙️  SETTINGS",
+            {
+                fontSize: "22px",
+                fill: "#ffffff",
+                stroke: "#000000",
+                strokeThickness: 4
+            }
+        ).setScrollFactor(0).setDepth(21).setVisible(false).setOrigin(0.5);
+
+        this.settingsDivider = this.add.rectangle(
+            this.scale.width / 2,
+            this.scale.height / 2 - 40,
+            360, 2,
+            0x444444
+        ).setScrollFactor(0).setDepth(21).setVisible(false);
+
+        this.musicButton = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2,
+            "🎵  Music: ON",
+            {
+                fontSize: "16px",
+                fill: "#00ff00",
+                stroke: "#000000",
+                strokeThickness: 3,
+                backgroundColor: "#222222",
+                padding: { x: 20, y: 8 }
+            }
+        ).setScrollFactor(0).setDepth(21).setVisible(false).setOrigin(0.5)
+         .setInteractive({ useHandCursor: true });
+
+        this.musicButton.on('pointerover', () => {
+            this.musicButton.setStyle({ fill: "#ffff00" });
+        });
+        this.musicButton.on('pointerout', () => {
+            this.musicButton.setStyle({
+                fill: this.musicEnabled ? "#00ff00" : "#ff4444"
+            });
+        });
+        this.musicButton.on('pointerdown', () => {
+            this.musicEnabled = !this.musicEnabled;
+            if (this.musicEnabled) {
+                this.bgm.play();
+                this.musicButton.setText("🎵  Music: ON");
+                this.musicButton.setStyle({ fill: "#00ff00" });
+            } else {
+                this.bgm.stop();
+                this.musicButton.setText("🎵  Music: OFF");
+                this.musicButton.setStyle({ fill: "#ff4444" });
+            }
+        });
+
+        this.settingsClose = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2 + 65,
+            "Press ESC to close",
+            {
+                fontSize: "12px",
+                fill: "#888888",
+                stroke: "#000000",
+                strokeThickness: 2
+            }
+        ).setScrollFactor(0).setDepth(21).setVisible(false).setOrigin(0.5);
+
+        // Background music
+        this.bgm = this.sound.add("bgm", {
+            loop: true,
+            volume: 0.5
+        });
+        this.bgm.play();
+
+        // Camera
+        this.cameras.main.setBounds(
+            0, 0,
+            this.map.widthInPixels,
+            this.map.heightInPixels
+        );
+        this.cameras.main.startFollow(my.sprite.player, true, 0.1, 0.1);
         this.cameras.main.setDeadzone(50, 50);
         this.cameras.main.setZoom(this.SCALE);
     }
 
+    openSettings() {
+        this.settingsOpen = true;
+        this.settingsOverlay.setVisible(true);
+        this.settingsTitle.setVisible(true);
+        this.settingsDivider.setVisible(true);
+        this.musicButton.setVisible(true);
+        this.settingsClose.setVisible(true);
+        this.physics.world.pause();
+        this.tweens.pauseAll();
+    }
+
+    closeSettings() {
+        this.settingsOpen = false;
+        this.settingsOverlay.setVisible(false);
+        this.settingsTitle.setVisible(false);
+        this.settingsDivider.setVisible(false);
+        this.musicButton.setVisible(false);
+        this.settingsClose.setVisible(false);
+        this.physics.world.resume();
+        this.tweens.resumeAll();
+    }
+
+    takeDamage(isWater) {
+        if (this.isDead) return;
+        this.isDead = true;
+
+        my.vfx.hurt.setPosition(my.sprite.player.x, my.sprite.player.y);
+        my.vfx.hurt.explode(10);
+        this.cameras.main.flash(300, 255, 0, 0);
+        if (this.sound.get("hurtSound")) this.sound.play("hurtSound");
+
+        if (isWater) {
+            this.health = 0;
+
+            let heartsStr = "";
+            for (let i = 0; i < this.health; i++) heartsStr += "❤️";
+            for (let i = this.health; i < this.maxHealth; i++) heartsStr += "🖤";
+            this.healthHearts.setText(heartsStr);
+
+            this.time.delayedCall(300, () => {
+                let respawnX = this.respawnX || this.startX;
+                let respawnY = this.respawnY || this.startY;
+                my.sprite.player.setPosition(respawnX, respawnY);
+                my.sprite.player.setVelocity(0, 0);
+                my.sprite.player.setAcceleration(0, 0);
+                this.isDead = false;
+            });
+        } else {
+            this.health--;
+
+            let heartsStr = "";
+            for (let i = 0; i < this.health; i++) heartsStr += "❤️";
+            for (let i = this.health; i < this.maxHealth; i++) heartsStr += "🖤";
+            this.healthHearts.setText(heartsStr);
+
+            if (this.health <= 0) {
+                this.time.delayedCall(400, () => {
+                    if (this.bgm) this.bgm.stop();
+                    this.gameOverOverlay.setVisible(true);
+                    this.gameOverTitle.setVisible(true);
+                    this.gameOverSub.setVisible(true);
+                    this.gameOverRestart.setVisible(true);
+
+                    this.tweens.add({
+                        targets: this.gameOverTitle,
+                        alpha: { from: 1, to: 0.4 },
+                        duration: 600,
+                        yoyo: true,
+                        repeat: -1
+                    });
+
+                    this.input.keyboard.once("keydown-R", () => {
+                        this.scene.restart();
+                    });
+                });
+                return;
+            }
+
+            this.time.delayedCall(400, () => {
+                my.sprite.player.setPosition(this.respawnX, this.respawnY);
+                my.sprite.player.setVelocity(0, 0);
+                my.sprite.player.setAcceleration(0, 0);
+                this.isDead = false;
+            });
+        }
+    }
+
     update() {
-        if(cursors.left.isDown) {
+        if (this.isDead) return;
+
+        if (Phaser.Input.Keyboard.JustDown(this.escKey)) {
+            if (this.settingsOpen) {
+                this.closeSettings();
+            } else {
+                this.openSettings();
+            }
+        }
+
+        if (this.settingsOpen) return;
+
+        // Water hazard check using rect bounds
+        let px = my.sprite.player.x;
+        let py = my.sprite.player.y;
+        this.waterRects.forEach(rect => {
+            if (Phaser.Geom.Rectangle.Contains(rect, px, py)) {
+                this.takeDamage(true);
+            }
+        });
+
+        // Sign interaction
+        let wasNearSign = this.nearSign;
+        this.nearSign = null;
+
+        if (wasNearSign) {
+            let promptX = wasNearSign.x;
+            let promptY = wasNearSign.y - (wasNearSign.displayHeight || 32) - 16;
+            this.signPromptBackground.setPosition(promptX, promptY);
+            this.signPrompt.setPosition(promptX, promptY);
+            this.signPromptBackground.setVisible(true);
+            this.signPrompt.setVisible(true);
+            if (Phaser.Input.Keyboard.JustDown(this.eKey)) {
+                if (this.signVisible) {
+                    this.signMessage.setVisible(false);
+                    this.signVisible = false;
+                } else {
+                    this.signMessage.setText(
+                        "Welcome to the Mushroom Marshes!\n" +
+                        "Collect all 3 keys to escape!\n" +
+                        "Psst... collect ALL coins to\n" +
+                        "discover a secret level..."
+                    );
+                    this.signMessage.setVisible(true);
+                    this.signVisible = true;
+                }
+            }
+        } else {
+            this.signPromptBackground.setVisible(false);
+            this.signPrompt.setVisible(false);
+            this.signMessage.setVisible(false);
+            this.signVisible = false;
+        }
+
+        // Landing detection
+        const onGround = my.sprite.player.body.blocked.down;
+        if (onGround && !this.wasOnGround) {
+            my.vfx.land.setPosition(
+                my.sprite.player.x,
+                my.sprite.player.y + 8
+            );
+            my.vfx.land.explode(6);
+            if (this.sound.get("landSound")) this.sound.play("landSound");
+        }
+        this.wasOnGround = onGround;
+
+        // Horizontal movement
+        if (cursors.left.isDown) {
             my.sprite.player.setAccelerationX(-this.ACCELERATION);
             my.sprite.player.resetFlip();
             my.sprite.player.anims.play('walk', true);
-            // TODO: add particle following code here
-            // Position dust at player's feet and keep it running
+            this.lastDirection = -1;
+
             my.vfx.walk.setPosition(
-                my.sprite.player.x + 4,                              // trail behind (facing left)
-                my.sprite.player.y + my.sprite.player.height * 0.4   // at feet
+                my.sprite.player.x + 4,
+                my.sprite.player.y + my.sprite.player.height * 0.4
             );
             if (!my.vfx.walk.emitting) my.vfx.walk.start();
 
-        } else if(cursors.right.isDown) {
+        } else if (cursors.right.isDown) {
             my.sprite.player.setAccelerationX(this.ACCELERATION);
             my.sprite.player.setFlip(true, false);
             my.sprite.player.anims.play('walk', true);
-            // TODO: add particle following code here
-            // Position dust at player's feet and keep it running
+            this.lastDirection = 1;
+
             my.vfx.walk.setPosition(
-                my.sprite.player.x - 4,                              // trail behind (facing right)
-                my.sprite.player.y + my.sprite.player.height * 0.4   // at feet
+                my.sprite.player.x - 4,
+                my.sprite.player.y + my.sprite.player.height * 0.4
             );
             if (!my.vfx.walk.emitting) my.vfx.walk.start();
 
         } else {
-            // Set acceleration to 0 and have DRAG take over
             my.sprite.player.setAccelerationX(0);
             my.sprite.player.setDragX(this.DRAG);
             my.sprite.player.anims.play('idle');
-            // TODO: have the vfx stop playing
             if (my.vfx.walk.emitting) my.vfx.walk.stop();
         }
 
-        // player jump
-        // note that we need body.blocked rather than body.touching b/c the former applies to tilemap tiles and the latter to the "ground"
-        if(!my.sprite.player.body.blocked.down) {
+        // Camera offset ahead of player
+        this.cameras.main.setFollowOffset(-this.lastDirection * 100, 0);
+
+        // Jump and double jump
+        if (onGround) {
+            this.canDoubleJump = true;
+            this.hasDoubleJumped = false;
+        }
+
+        if (!onGround) {
             my.sprite.player.anims.play('jump');
         }
-        if(my.sprite.player.body.blocked.down && Phaser.Input.Keyboard.JustDown(cursors.up)) {
-            my.sprite.player.body.setVelocityY(this.JUMP_VELOCITY);
-        }
 
-        if(Phaser.Input.Keyboard.JustDown(this.rKey)) {
-            this.scene.restart();
-        }
+        if (Phaser.Input.Keyboard.JustDown(cursors.up)) {
+            if (onGround) {
+                my.sprite.player.body.setVelocityY(this.JUMP_VELOCITY);
+                my.vfx.jump.setPosition(
+                    my.sprite.player.x,
+                    my.sprite.player.y + 8
+                );
+                my.vfx.jump.explode(8);
+                if (this.sound.get("jumpSound")) this.sound.play("jumpSound");
 
-        // Pause key — press P to freeze/unfreeze everything for screenshot
-        // this.scene.pause() stops physics, animations, particles, and update loop
-        if(Phaser.Input.Keyboard.JustDown(this.pKey)) {
-            if(this.scene.isPaused()) {
-                this.scene.resume();
-            } else {
-                this.scene.pause();
+            } else if (this.canDoubleJump && !this.hasDoubleJumped) {
+                my.sprite.player.body.setVelocityY(this.DOUBLE_JUMP_VELOCITY);
+                this.hasDoubleJumped = true;
+                this.canDoubleJump = false;
+                my.vfx.doubleJump.setPosition(
+                    my.sprite.player.x,
+                    my.sprite.player.y
+                );
+                my.vfx.doubleJump.explode(10);
+                if (this.sound.get("doubleJumpSound")) this.sound.play("doubleJumpSound");
             }
+        }
+
+        if (Phaser.Input.Keyboard.JustDown(this.rKey)) {
+            if (this.bgm) this.bgm.stop();
+            this.scene.restart();
         }
     }
 }

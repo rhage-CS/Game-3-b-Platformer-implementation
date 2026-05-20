@@ -1,3 +1,6 @@
+// Load.js
+// Handles all asset loading and animation creation
+
 class Load extends Phaser.Scene {
     constructor() {
         super("loadScene");
@@ -10,8 +13,8 @@ class Load extends Phaser.Scene {
         this.load.atlas("platformer_characters", "tilemap-characters-packed.png", "tilemap-characters-packed.json");
 
         // Load tilemap information
-        this.load.image("tilemap_tiles", "tilemap_packed.png");                         // Packed tilemap
-        this.load.tilemapTiledJSON("platformer-level-1", "platformer-level-1.tmj");   // Tilemap in JSON
+        this.load.image("tilemap_tiles", "tilemap_packed.png");
+        this.load.tilemapTiledJSON("platformer-level-1", "platformer-level-1.tmj");
 
         // Load the tilemap as a spritesheet
         this.load.spritesheet("tilemap_sheet", "tilemap_packed.png", {
@@ -19,16 +22,26 @@ class Load extends Phaser.Scene {
             frameHeight: 18
         });
 
-        // Oooh, fancy. A multi atlas is a texture atlas which has the textures spread
-        // across multiple png files, so as to keep their size small for use with
-        // lower resource devices (like mobile phones).
-        // kenny-particles.json internally has a list of the png files
-        // The multiatlas was created using TexturePacker and the Kenny
-        // Particle Pack asset pack.
+        // Kenny particle atlas
         this.load.multiatlas("kenny-particles", "kenny-particles.json");
+
+        // Background music — add your mp3 to assets folder
+        // Replace "bgm.mp3" with your actual filename
+        this.load.audio("bgm", "bgm.mp3");
+
+        // Audio effects
+        // Get free sounds at https://kenney.nl/assets/interface-sounds
+        this.load.audio("jumpSound",       "jump.wav");
+        this.load.audio("doubleJumpSound", "jump2.wav");
+        this.load.audio("landSound",       "land.wav");
+        this.load.audio("gemSound",        "coin.wav");
+        this.load.audio("keySound",        "key.wav");
+        this.load.audio("hurtSound",       "hurt.wav");
+        this.load.audio("doorOpenSound",   "doorOpen.wav");
     }
 
     create() {
+        // PLAYER ANIMATIONS
         this.anims.create({
             key: 'walk',
             frames: this.anims.generateFrameNames('platformer_characters', {
@@ -45,25 +58,49 @@ class Load extends Phaser.Scene {
         this.anims.create({
             key: 'idle',
             defaultTextureKey: "platformer_characters",
-            frames: [
-                { frame: "tile_0000.png" }
-            ],
+            frames: [{ frame: "tile_0000.png" }],
             repeat: -1
         });
 
         this.anims.create({
             key: 'jump',
             defaultTextureKey: "platformer_characters",
-            frames: [
-                { frame: "tile_0001.png" }
-            ],
+            frames: [{ frame: "tile_0001.png" }],
         });
 
-         // ...and pass to the next Scene
-         this.scene.start("platformerScene");
+        // COIN SPIN ANIMATION
+        // 2-frame spin using tilemap_sheet frames 151 and 152
+        // Guard with exists() so it doesn't re-register on scene restart
+        if (!this.anims.exists('coin-spin')) {
+            this.anims.create({
+                key: 'coin-spin',
+                frames: this.anims.generateFrameNumbers('tilemap_sheet', {
+                    start: 151,
+                    end: 152
+                }),
+                frameRate: 6,
+                repeat: -1
+            });
+        }
+
+        // WATER TILE ANIMATION
+        // 2-frame ripple between tile 53 and 33
+        // Tiled is 1-based, Phaser is 0-based so we subtract 1
+        if (!this.anims.exists('water-anim')) {
+            this.anims.create({
+                key: 'water-anim',
+                frames: [
+                    { key: 'tilemap_sheet', frame: 52 },  // Tiled frame 53
+                    { key: 'tilemap_sheet', frame: 32 }   // Tiled frame 33
+                ],
+                frameRate: 2,   // slow ripple
+                repeat: -1
+            });
+        }
+
+        // ...and pass to the next Scene
+        this.scene.start("platformerScene");
     }
 
-    // Never get here since a new scene is started in create()
-    update() {
-    }
+    update() {}
 }
